@@ -50,6 +50,7 @@ These shortcuts work in **command mode**. If you're typing in an agent pane, pre
 | `1`–`9` | Jump to card N and focus its pane |
 | `/` | Filter sessions (opens filter input — see [Dialogs](#dialogs)) |
 | `r` | Rename selected session (opens rename input — see [Dialogs](#dialogs)) |
+| `R` | Reset session — kill and respawn the current pane's child process (see [Dialogs](#dialogs)) |
 | `g` | Generate `.dot-agent-deck.toml` (opens config-generation prompt — see [Dialogs](#dialogs)) |
 | `?` | Toggle help overlay |
 | `y` / `n` | Approve / deny a pending permission request (only when an agent is waiting) |
@@ -91,4 +92,5 @@ Several dashboard shortcuts open transient input fields or selection dialogs. Th
 | **Rename** | `r` | Type the new name · `Enter` to confirm · `Esc` to cancel |
 | **Generate config** | `g` | `Up`/`Down` (or `k`/`j`) to choose **Yes** / **No** / **Never** · `Enter` to confirm · `Esc` to cancel. **Yes** sends a prompt to the agent to write `.dot-agent-deck.toml`; **Never** suppresses the hint permanently for that directory. |
 | **Quit confirmation** | `Ctrl+c` from command mode | `Up`/`Down` (or `k`/`j`) to choose **Yes** / **No** · `Enter` to confirm · `Esc` to dismiss · `Ctrl+c` again to quit immediately |
+| **Reset confirmation** | `R` in command mode | `r` resume · `f` fresh · `Esc` / `Ctrl+c` cancel · `Up`/`Down` (or `k`/`j`) navigate · `Enter` confirm selection. Shows a warning variant if the agent is actively streaming. |
 | **Help overlay** | `?` | `?`, `Esc`, or `q` to dismiss |
