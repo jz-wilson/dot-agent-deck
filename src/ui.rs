@@ -514,8 +514,6 @@ struct UiState {
     orchestration_created_at: HashMap<TabId, std::time::Instant>,
     /// Prompts waiting to be injected into panes once their agent is ready (M5 dispatch).
     pending_dispatches: Vec<PendingDispatch>,
-    /// Cached card metadata config (parsed once at startup from project config).
-    card_meta: Option<crate::project_config::CardMetadataConfig>,
 }
 
 /// Tracks an in-progress or completed mouse text selection within a pane.
@@ -569,12 +567,6 @@ impl UiState {
             orchestration_prompted: HashSet::new(),
             orchestration_created_at: HashMap::new(),
             pending_dispatches: Vec::new(),
-            card_meta: {
-                let cwd = std::env::current_dir().ok();
-                cwd.as_ref()
-                    .and_then(|d| crate::project_config::load_project_config(d).ok().flatten())
-                    .and_then(|c| c.card_metadata())
-            },
         }
     }
 }
@@ -1904,6 +1896,12 @@ pub fn run_tui(
     let mut terminal = ratatui::init();
     let mut tick: u64 = 0;
     let mut ui = UiState::new(config, palette);
+    let card_meta: Option<crate::project_config::CardMetadataConfig> = {
+        let cwd = std::env::current_dir().ok();
+        cwd.as_ref()
+            .and_then(|d| crate::project_config::load_project_config(d).ok().flatten())
+            .and_then(|c| c.card_metadata())
+    };
     let mut tab_manager = TabManager::new(Arc::clone(&pane));
 
     let mut star_state = config::StarPromptState::load();
@@ -2336,13 +2334,6 @@ pub fn run_tui(
             labels: tab_bar_labels,
             active_index: tab_manager.active_index(),
         };
-        // Card metadata is cached on UiState at startup (compiles regex once, not per tick).
-        // SAFETY: `ui.card_meta` is not mutated inside the `terminal.draw` closure; the raw
-        // pointer is only used to extend the borrow lifetime enough to satisfy the closure
-        // capture while `&mut ui` is also captured for `render_frame`.
-        let card_meta: Option<&crate::project_config::CardMetadataConfig> =
-            // SAFETY: pointer is valid for the lifetime of `ui` which outlives the closure.
-            ui.card_meta.as_ref().map(|m| unsafe { &*(m as *const _) });
         terminal.draw(|frame| {
             render_frame(
                 frame,
@@ -2355,7 +2346,7 @@ pub fn run_tui(
                 pane_layout,
                 &tab_view,
                 &tab_bar_info,
-                card_meta,
+                card_meta.as_ref(),
             );
         })?;
         tick = tick.wrapping_add(1);
