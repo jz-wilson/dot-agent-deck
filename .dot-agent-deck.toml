@@ -15,6 +15,10 @@ watch = false
 pattern = "git (log|status|show|diff)"
 watch = false
 
+[card_metadata]
+branch_id_regex = "(?:feature|fix|hotfix|bugfix|chore)[/+\\-](\\d+)"
+id_prefix = ""
+
 [[orchestrations]]
 name = "dot-agent-deck"
 
