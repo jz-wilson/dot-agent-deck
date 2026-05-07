@@ -53,6 +53,11 @@ pub struct SessionState {
     pub last_user_prompt: Option<String>,
     pub first_prompts: Vec<String>,
     pub pane_id: Option<String>,
+    /// Git branch name of the pane's cwd, or dir basename if not a git repo.
+    /// None until first refresh.
+    pub git_branch: Option<String>,
+    /// Last time the branch was refreshed.
+    pub git_branch_refreshed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -124,6 +129,8 @@ impl AppState {
                 last_user_prompt: None,
                 first_prompts: Vec::new(),
                 pane_id: Some(pane_id),
+                git_branch: None,
+                git_branch_refreshed_at: None,
             },
         );
     }
@@ -181,6 +188,21 @@ impl AppState {
         }
 
         self.work_done_events.push(signal);
+    }
+
+    /// Refresh git_branch for all sessions whose branch is stale (older than 30s).
+    pub fn refresh_stale_branches(&mut self) {
+        let now = Utc::now();
+        let threshold = chrono::Duration::seconds(30);
+        for session in self.sessions.values_mut() {
+            let needs_refresh = match session.git_branch_refreshed_at {
+                None => true,
+                Some(t) => (now - t) > threshold,
+            };
+            if needs_refresh {
+                refresh_git_branch(session);
+            }
+        }
     }
 
     pub fn apply_event(&mut self, mut event: AgentEvent) {
@@ -253,6 +275,8 @@ impl AppState {
                 last_user_prompt: None,
                 first_prompts: Vec::new(),
                 pane_id: event.pane_id.clone(),
+                git_branch: None,
+                git_branch_refreshed_at: None,
             });
 
         session.last_activity = event.timestamp;
@@ -324,6 +348,56 @@ impl AppState {
         session.recent_events.push_back(event);
         if session.recent_events.len() > MAX_RECENT_EVENTS {
             session.recent_events.pop_front();
+        }
+    }
+}
+
+/// Refresh the git branch for a session.
+/// Runs `git -C <cwd> rev-parse --abbrev-ref HEAD` synchronously.
+/// Falls back to directory basename if cwd is not a git repo.
+/// Does nothing if cwd is None.
+pub fn refresh_git_branch(session: &mut SessionState) {
+    let cwd = match &session.cwd {
+        Some(c) => c.clone(),
+        None => return,
+    };
+
+    let branch = run_git_branch(&cwd);
+    session.git_branch = Some(branch);
+    session.git_branch_refreshed_at = Some(Utc::now());
+}
+
+fn run_git_branch(cwd: &str) -> String {
+    use std::process::Command;
+
+    let output = Command::new("git")
+        .args(["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"])
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let branch = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if branch == "HEAD" {
+                // Detached HEAD — get short SHA
+                let sha_out = Command::new("git")
+                    .args(["-C", cwd, "rev-parse", "--short", "HEAD"])
+                    .output();
+                match sha_out {
+                    Ok(s) if s.status.success() => {
+                        format!("detached@{}", String::from_utf8_lossy(&s.stdout).trim())
+                    }
+                    _ => "detached".to_string(),
+                }
+            } else {
+                branch
+            }
+        }
+        _ => {
+            // Not a git repo — use dir basename
+            std::path::Path::new(cwd)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| cwd.to_string())
         }
     }
 }
@@ -980,5 +1054,67 @@ mod tests {
 
         assert_eq!(state.work_done_events.len(), 1);
         assert!(state.work_done_events[0].done);
+    }
+
+    #[test]
+    fn refresh_git_branch_non_git_dir() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let basename = dir
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        let mut session = SessionState {
+            session_id: "test".to_string(),
+            agent_type: crate::event::AgentType::ClaudeCode,
+            cwd: Some(path),
+            status: SessionStatus::Idle,
+            active_tool: None,
+            started_at: Utc::now(),
+            last_activity: Utc::now(),
+            recent_events: VecDeque::new(),
+            tool_count: 0,
+            last_user_prompt: None,
+            first_prompts: Vec::new(),
+            pane_id: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
+        };
+
+        refresh_git_branch(&mut session);
+
+        assert_eq!(session.git_branch.as_deref(), Some(basename.as_str()));
+    }
+
+    #[test]
+    fn refresh_git_branch_sets_refreshed_at() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+
+        let mut session = SessionState {
+            session_id: "test".to_string(),
+            agent_type: crate::event::AgentType::ClaudeCode,
+            cwd: Some(path),
+            status: SessionStatus::Idle,
+            active_tool: None,
+            started_at: Utc::now(),
+            last_activity: Utc::now(),
+            recent_events: VecDeque::new(),
+            tool_count: 0,
+            last_user_prompt: None,
+            first_prompts: Vec::new(),
+            pane_id: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
+        };
+
+        assert!(session.git_branch_refreshed_at.is_none());
+        refresh_git_branch(&mut session);
+        assert!(session.git_branch_refreshed_at.is_some());
     }
 }

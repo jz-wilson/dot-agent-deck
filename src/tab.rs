@@ -771,6 +771,8 @@ mod tests {
                 last_user_prompt: None,
                 first_prompts: Vec::new(),
                 pane_id: None,
+                git_branch: None,
+                git_branch_refreshed_at: None,
             },
         )
     }
@@ -832,6 +834,8 @@ mod tests {
                 last_user_prompt: None,
                 first_prompts: Vec::new(),
                 pane_id: None,
+                git_branch: None,
+                git_branch_refreshed_at: None,
             },
         );
         let mut last_routed = HashMap::new();

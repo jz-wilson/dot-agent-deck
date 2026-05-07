@@ -2176,6 +2176,9 @@ pub fn run_tui(
             ui.status_message = None;
         }
 
+        // Refresh git branches for sessions with stale data (gated by 30s threshold).
+        state.blocking_write().refresh_stale_branches();
+
         let snapshot = state.blocking_read().clone();
 
         // Route new Bash commands through mode tabs for reactive panes.
@@ -5736,6 +5739,8 @@ mod tests {
             last_user_prompt: None,
             first_prompts: Vec::new(),
             pane_id: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
         };
 
         let palette = ColorPalette::dark();
@@ -6597,6 +6602,8 @@ mod tests {
             last_user_prompt: None,
             first_prompts: Vec::new(),
             pane_id: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
         }
     }
 
@@ -6787,6 +6794,8 @@ mod tests {
             last_user_prompt: Some("third prompt".to_string()),
             first_prompts: Vec::new(),
             pane_id: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
         };
 
         // Spacious: get all 3
@@ -6819,6 +6828,8 @@ mod tests {
             last_user_prompt: Some("old prompt".to_string()),
             first_prompts: Vec::new(),
             pane_id: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
         };
 
         let prompts = collect_recent_prompts(&session, 3);
@@ -6842,6 +6853,8 @@ mod tests {
             last_user_prompt: None,
             first_prompts: Vec::new(),
             pane_id: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
         };
 
         let prompts = collect_recent_prompts(&session, 3);
@@ -8263,6 +8276,8 @@ mod tests {
                     last_user_prompt: None,
                     first_prompts: Vec::new(),
                     pane_id: Some(orchestrator_pane.clone()),
+                    git_branch: None,
+                    git_branch_refreshed_at: None,
                 },
             );
         }
@@ -8335,6 +8350,8 @@ mod tests {
                     last_user_prompt: None,
                     first_prompts: Vec::new(),
                     pane_id: Some(orchestrator_pane.clone()),
+                    git_branch: None,
+                    git_branch_refreshed_at: None,
                 },
             );
         }
