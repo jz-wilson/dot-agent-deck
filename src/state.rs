@@ -191,6 +191,9 @@ impl AppState {
     }
 
     /// Refresh git_branch for all sessions whose branch is stale (older than 30s).
+    // Note: git subprocess runs synchronously inside the write lock. This is acceptable
+    // for local repos (typically <10ms) but may cause brief UI stutter on slow network
+    // mounts. Non-blocking async refresh is a future improvement.
     pub fn refresh_stale_branches(&mut self) {
         let now = Utc::now();
         let threshold = chrono::Duration::seconds(30);
@@ -355,16 +358,21 @@ impl AppState {
 /// Refresh the git branch for a session.
 /// Runs `git -C <cwd> rev-parse --abbrev-ref HEAD` synchronously.
 /// Falls back to directory basename if cwd is not a git repo.
-/// Does nothing if cwd is None.
+/// If cwd is None, marks the session as attempted so it won't be retried every tick.
 pub fn refresh_git_branch(session: &mut SessionState) {
+    let now = Utc::now();
     let cwd = match &session.cwd {
         Some(c) => c.clone(),
-        None => return,
+        None => {
+            // Mark as attempted so we don't retry every tick.
+            session.git_branch_refreshed_at = Some(now);
+            return;
+        }
     };
 
     let branch = run_git_branch(&cwd);
     session.git_branch = Some(branch);
-    session.git_branch_refreshed_at = Some(Utc::now());
+    session.git_branch_refreshed_at = Some(now);
 }
 
 fn run_git_branch(cwd: &str) -> String {
@@ -1116,5 +1124,32 @@ mod tests {
         assert!(session.git_branch_refreshed_at.is_none());
         refresh_git_branch(&mut session);
         assert!(session.git_branch_refreshed_at.is_some());
+    }
+
+    #[test]
+    fn refresh_git_branch_cwd_none_sets_refreshed_at_without_branch() {
+        let mut session = SessionState {
+            session_id: "test-none-cwd".to_string(),
+            agent_type: crate::event::AgentType::None,
+            cwd: None,
+            status: SessionStatus::Idle,
+            active_tool: None,
+            started_at: Utc::now(),
+            last_activity: Utc::now(),
+            recent_events: VecDeque::new(),
+            tool_count: 0,
+            last_user_prompt: None,
+            first_prompts: Vec::new(),
+            pane_id: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
+        };
+
+        assert!(session.git_branch_refreshed_at.is_none());
+        refresh_git_branch(&mut session);
+        // Should be marked attempted so refresh_stale_branches won't re-check every tick.
+        assert!(session.git_branch_refreshed_at.is_some());
+        // Branch remains None since there is no cwd to inspect.
+        assert!(session.git_branch.is_none());
     }
 }
