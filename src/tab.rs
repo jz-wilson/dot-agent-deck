@@ -539,6 +539,7 @@ mod tests {
                 command: "kubectl get pods -w".to_string(),
                 name: Some("Pods".to_string()),
                 watch: false,
+                agent_type: None,
             }],
             rules: vec![ModeRule {
                 pattern: r"kubectl\s+describe".to_string(),
@@ -867,6 +868,7 @@ mod tests {
                     description: None,
                     prompt_template: Some("Write failing tests.".to_string()),
                     clear: true,
+                    agent_type: None,
                 },
                 OrchestrationRoleConfig {
                     name: "coder".to_string(),
@@ -875,6 +877,7 @@ mod tests {
                     description: Some("Implements code changes".to_string()),
                     prompt_template: Some("Make the tests pass.".to_string()),
                     clear: true,
+                    agent_type: None,
                 },
             ],
         }
