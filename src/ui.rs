@@ -3561,11 +3561,18 @@ pub fn run_tui(
                     if let Some(embedded) = pane.as_any().downcast_ref::<EmbeddedPaneController>()
                         && let Some(focused_pane_id) = embedded.focused_pane_id()
                     {
-                        let cwd = state
-                            .blocking_read()
+                        let st = state.blocking_read();
+                        let cwd = st
                             .pane_cwd_map
                             .get(focused_pane_id.as_str())
-                            .cloned();
+                            .cloned()
+                            .or_else(|| {
+                                st.sessions
+                                    .values()
+                                    .find(|s| s.pane_id.as_deref() == Some(&focused_pane_id))
+                                    .and_then(|s| s.cwd.clone())
+                            });
+                        drop(st);
                         let command_str = ui
                             .pane_metadata
                             .get(focused_pane_id.as_str())
@@ -5293,9 +5300,9 @@ fn render_session_card(
         });
 
         let footer_text = if let Some(id) = id_part {
-            format!("{branch_display} @ {id}")
+            format!("Branch: {branch_display} @ {id}")
         } else {
-            branch_display.to_string()
+            format!("Branch: {branch_display}")
         };
 
         // Middle-truncate if too long
