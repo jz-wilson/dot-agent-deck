@@ -20,7 +20,9 @@ use crate::config_validation::sanitize_role_name;
 use crate::embedded_pane::EmbeddedPaneController;
 use crate::event::{AgentType, EventType};
 use crate::pane::{PaneController, PaneError};
-use crate::project_config::{ModeConfig, OrchestrationConfig, load_project_config};
+use crate::project_config::{
+    CardMetadataConfig, ModeConfig, OrchestrationConfig, load_project_config,
+};
 use crate::state::{AppState, DashboardStats, SessionState, SessionStatus, SharedState};
 use crate::tab::{OrchestrationRoleStatus, OrchestrationStatus, Tab, TabId, TabManager};
 use crate::terminal_widget::TerminalWidget;
@@ -1448,6 +1450,23 @@ fn truncate_with_ellipsis(input: &str, max_chars: usize) -> String {
     out
 }
 
+/// Truncate a string in the middle, replacing the omitted portion with '…'.
+/// Preserves both prefix and suffix so branch names like `feature/12345-long-desc`
+/// remain recognizable.
+fn middle_truncate(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    if max_chars < 3 {
+        return "…".to_string();
+    }
+    let half = (max_chars - 1) / 2;
+    let left: String = s.chars().take(half).collect();
+    let right: String = s.chars().rev().take(max_chars - half - 1).collect();
+    let right: String = right.chars().rev().collect();
+    format!("{left}…{right}")
+}
+
 /// Select deck at `idx` and focus its pane. Returns `true` if idx was valid.
 fn focus_deck(
     idx: usize,
@@ -2309,6 +2328,11 @@ pub fn run_tui(
             labels: tab_bar_labels,
             active_index: tab_manager.active_index(),
         };
+        // Load card metadata once per render pass (compiles regex — do not call per card).
+        let card_meta = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| load_project_config(&cwd).ok().flatten())
+            .and_then(|cfg| cfg.card_metadata());
         terminal.draw(|frame| {
             render_frame(
                 frame,
@@ -2321,6 +2345,7 @@ pub fn run_tui(
                 pane_layout,
                 &tab_view,
                 &tab_bar_info,
+                card_meta.as_ref(),
             );
         })?;
         tick = tick.wrapping_add(1);
@@ -3545,6 +3570,7 @@ fn render_frame(
     pane_layout: PaneLayout,
     tab_view: &ActiveTabView,
     tab_bar: &TabBarInfo,
+    card_meta: Option<&CardMetadataConfig>,
 ) {
     let area = frame.area();
     let palette = ui.palette;
@@ -3845,6 +3871,7 @@ fn render_frame(
                 density,
                 palette,
                 idle_art,
+                card_meta,
             );
         }
     }
@@ -4918,6 +4945,7 @@ fn render_session_card(
     density: CardDensity,
     palette: ColorPalette,
     idle_art: Option<&IdleArtEntry>,
+    card_metadata: Option<&CardMetadataConfig>,
 ) {
     let is_placeholder = session.agent_type == crate::event::AgentType::None;
     let (status_label, status_style) = if is_placeholder {
@@ -5057,6 +5085,32 @@ fn render_session_card(
     }
     let tool_lines = recent_tool_lines(session, density.max_tools(), palette);
     lines.extend(tool_lines);
+
+    // Footer: git branch + work-item ID overlay
+    if let Some(meta) = card_metadata
+        && w >= 20
+    {
+        let branch_display = session.git_branch.as_deref().unwrap_or("—");
+        let id_part = meta.branch_id_regex.as_ref().and_then(|re| {
+            re.captures(branch_display)
+                .and_then(|caps| caps.get(1))
+                .map(|m| format!("{}{}", meta.id_prefix, m.as_str()))
+        });
+
+        let footer_text = if let Some(id) = id_part {
+            format!("{branch_display} @ {id}")
+        } else {
+            branch_display.to_string()
+        };
+
+        // Middle-truncate if too long
+        let footer_display = middle_truncate(&footer_text, w.saturating_sub(2));
+
+        lines.push(Line::from(Span::styled(
+            footer_display,
+            Style::default().fg(palette.text_muted),
+        )));
+    }
 
     let content = Paragraph::new(lines);
     frame.render_widget(content, inner);
@@ -5429,6 +5483,7 @@ mod tests {
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
                     },
+                    None,
                 )
             })
             .unwrap();
@@ -5496,6 +5551,7 @@ mod tests {
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
                     },
+                    None,
                 )
             })
             .unwrap();
@@ -5613,6 +5669,7 @@ mod tests {
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
                     },
+                    None,
                 )
             })
             .unwrap();
@@ -5828,6 +5885,7 @@ mod tests {
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
                     },
+                    None,
                 )
             })
             .unwrap();
