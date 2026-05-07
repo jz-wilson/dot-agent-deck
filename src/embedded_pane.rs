@@ -455,14 +455,25 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 
 /// Heuristically detect the agent type from a command string.
 /// Used by the UI when no explicit `agent_type` is set in config.
+///
+/// Matches on the basename only (last path component, before any args) to
+/// avoid false positives like "claudecode" matching "claude".
 pub fn detect_agent_type(cmd: &str) -> Option<crate::project_config::SpawnAgentType> {
     use crate::project_config::SpawnAgentType;
-    let lower = cmd.to_lowercase();
-    if lower.contains("claude") {
+    // Extract the basename (last path component, before any args).
+    let base = cmd
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .rsplit('/')
+        .next()
+        .unwrap_or("");
+    let lower = base.to_lowercase();
+    if lower == "claude" || lower.starts_with("claude-") {
         Some(SpawnAgentType::Claude)
-    } else if lower.contains("opencode") || lower.contains("open-code") {
+    } else if lower == "opencode" || lower.starts_with("opencode-") || lower == "open-code" {
         Some(SpawnAgentType::OpenCode)
-    } else if lower.contains("codex") {
+    } else if lower == "codex" || lower.starts_with("codex-") {
         Some(SpawnAgentType::Codex)
     } else {
         None
@@ -479,8 +490,20 @@ fn build_resume_command(
 ) -> Result<String, String> {
     use crate::project_config::SpawnAgentType;
     match agent_type {
-        Some(SpawnAgentType::Claude) => Ok(format!("{original} --continue")),
-        Some(SpawnAgentType::OpenCode) => Ok(format!("{original} --continue")),
+        Some(SpawnAgentType::Claude) => {
+            if original.is_empty() {
+                Ok("--continue".to_string())
+            } else {
+                Ok(format!("{original} --continue"))
+            }
+        }
+        Some(SpawnAgentType::OpenCode) => {
+            if original.is_empty() {
+                Ok("--continue".to_string())
+            } else {
+                Ok(format!("{original} --continue"))
+            }
+        }
         Some(SpawnAgentType::Codex) => Ok("codex resume --last".to_string()),
         Some(SpawnAgentType::Generic) | None => {
             Err("unknown agent type — resuming fresh".to_string())
@@ -916,5 +939,26 @@ mod tests {
         );
         assert_eq!(detect_agent_type("codex"), Some(SpawnAgentType::Codex));
         assert_eq!(detect_agent_type("bash"), None);
+    }
+
+    #[test]
+    fn detect_claudecode_is_not_claude() {
+        assert_eq!(detect_agent_type("claudecode"), None);
+    }
+
+    #[test]
+    fn detect_claude_full_path() {
+        use crate::project_config::SpawnAgentType;
+        assert_eq!(
+            detect_agent_type("/usr/local/bin/claude"),
+            Some(SpawnAgentType::Claude)
+        );
+    }
+
+    #[test]
+    fn resume_claude_empty_original() {
+        use crate::project_config::SpawnAgentType;
+        let result = build_resume_command("", Some(&SpawnAgentType::Claude));
+        assert_eq!(result.unwrap(), "--continue");
     }
 }
