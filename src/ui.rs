@@ -17,7 +17,7 @@ use crate::ascii_art::{AsciiArtResult, generate_ascii_art};
 use crate::config;
 use crate::config::{BellConfig, DashboardConfig, IdleArtConfig};
 use crate::config_validation::sanitize_role_name;
-use crate::embedded_pane::EmbeddedPaneController;
+use crate::embedded_pane::{EmbeddedPaneController, ResetMode};
 use crate::event::{AgentType, EventType};
 use crate::pane::{PaneController, PaneError};
 use crate::project_config::{ModeConfig, OrchestrationConfig, load_project_config};
@@ -116,6 +116,7 @@ enum UiMode {
     StarPrompt,
     ConfigGenPrompt,
     QuitConfirm,
+    ResetConfirm,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,6 +507,10 @@ struct UiState {
     config_gen_selected: usize,
     /// Selected option in quit confirm modal (0=Quit, 1=Cancel).
     quit_confirm_selected: usize,
+    /// Selected option in reset confirm modal (0=Resume, 1=Fresh, 2=Cancel).
+    reset_confirm_selected: usize,
+    /// True if the pane was streaming when R was pressed — shows warning variant.
+    reset_confirm_streaming: bool,
     /// Orchestration tab IDs whose start-role prompt has already been injected.
     orchestration_prompted: HashSet<TabId>,
     /// Tracks when orchestration tabs were created (for delayed prompt injection).
@@ -562,6 +567,8 @@ impl UiState {
             config_gen_target: None,
             config_gen_selected: 0,
             quit_confirm_selected: 0,
+            reset_confirm_selected: 0,
+            reset_confirm_streaming: false,
             orchestration_prompted: HashSet::new(),
             orchestration_created_at: HashMap::new(),
             pending_dispatches: Vec::new(),
@@ -1125,6 +1132,8 @@ enum KeyResult {
     SendConfigGenPrompt { pane_id: String, cwd: String },
     RequestConfigGen,
     ForwardToPane(Vec<u8>),
+    ResetConfirm,
+    ResetExecute(ResetMode),
 }
 
 /// Convert a crossterm `KeyEvent` into the byte sequence expected by a terminal PTY.
@@ -1357,6 +1366,44 @@ fn handle_quit_confirm_key(key: KeyEvent, ui: &mut UiState) -> KeyResult {
     }
 }
 
+fn handle_reset_confirm_key(key: KeyEvent, ui: &mut UiState) -> KeyResult {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if ui.reset_confirm_selected > 0 {
+                ui.reset_confirm_selected -= 1;
+            }
+            KeyResult::Continue
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if ui.reset_confirm_selected < 2 {
+                ui.reset_confirm_selected += 1;
+            }
+            KeyResult::Continue
+        }
+        KeyCode::Char('r') => {
+            ui.reset_confirm_selected = 0;
+            KeyResult::ResetExecute(ResetMode::Resume)
+        }
+        KeyCode::Char('f') => {
+            ui.reset_confirm_selected = 1;
+            KeyResult::ResetExecute(ResetMode::Fresh)
+        }
+        KeyCode::Enter => match ui.reset_confirm_selected {
+            0 => KeyResult::ResetExecute(ResetMode::Resume),
+            1 => KeyResult::ResetExecute(ResetMode::Fresh),
+            _ => {
+                ui.mode = UiMode::Normal;
+                KeyResult::Continue
+            }
+        },
+        KeyCode::Esc => {
+            ui.mode = UiMode::Normal;
+            KeyResult::Continue
+        }
+        _ => KeyResult::Continue,
+    }
+}
+
 fn handle_star_prompt_key(key: KeyEvent, ui: &mut UiState) -> KeyResult {
     match key.code {
         KeyCode::Char('s') => {
@@ -1558,6 +1605,7 @@ fn handle_normal_key(key: KeyEvent, ui: &mut UiState, total: usize) -> KeyResult
             ui.rename_text.clear();
             KeyResult::Continue
         }
+        KeyCode::Char('R') if total > 0 => KeyResult::ResetConfirm,
         KeyCode::Enter if total > 0 => KeyResult::Focus,
         KeyCode::Char('g') if total > 0 => KeyResult::RequestConfigGen,
         KeyCode::Esc => {
@@ -3107,6 +3155,7 @@ pub fn run_tui(
                     UiMode::StarPrompt => handle_star_prompt_key(key, &mut ui),
                     UiMode::ConfigGenPrompt => handle_config_gen_prompt_key(key, &mut ui),
                     UiMode::QuitConfirm => handle_quit_confirm_key(key, &mut ui),
+                    UiMode::ResetConfirm => handle_reset_confirm_key(key, &mut ui),
                 }
             };
 
@@ -3453,6 +3502,63 @@ pub fn run_tui(
                     }
                 }
                 KeyResult::Continue => {}
+                KeyResult::ResetConfirm => {
+                    if let Some(embedded) = pane.as_any().downcast_ref::<EmbeddedPaneController>()
+                        && let Some(focused_pane_id) = embedded.focused_pane_id()
+                    {
+                        let is_streaming = snapshot.sessions.values().any(|s| {
+                            s.pane_id.as_deref() == Some(focused_pane_id.as_str())
+                                && matches!(
+                                    s.status,
+                                    SessionStatus::Thinking
+                                        | SessionStatus::Working
+                                        | SessionStatus::Compacting
+                                )
+                        });
+                        ui.reset_confirm_streaming = is_streaming;
+                        ui.reset_confirm_selected = if is_streaming { 2 } else { 0 };
+                        ui.mode = UiMode::ResetConfirm;
+                    } else {
+                        ui.status_message =
+                            Some(("select a pane first".to_string(), std::time::Instant::now()));
+                    }
+                }
+                KeyResult::ResetExecute(mode) => {
+                    if let Some(embedded) = pane.as_any().downcast_ref::<EmbeddedPaneController>()
+                        && let Some(focused_pane_id) = embedded.focused_pane_id()
+                    {
+                        let cwd = state
+                            .blocking_read()
+                            .pane_cwd_map
+                            .get(focused_pane_id.as_str())
+                            .cloned();
+                        let command_str = ui
+                            .pane_metadata
+                            .get(focused_pane_id.as_str())
+                            .map(|m| m.command.clone())
+                            .unwrap_or_default();
+                        let agent_type = crate::embedded_pane::detect_agent_type(&command_str);
+                        let toast = match embedded.reset_pane(
+                            &focused_pane_id,
+                            mode,
+                            agent_type.as_ref(),
+                            cwd.as_deref(),
+                        ) {
+                            Ok(()) => "Session reset".to_string(),
+                            Err(crate::pane::PaneError::CommandFailed(ref reason)) => {
+                                reason.clone()
+                            }
+                            Err(e) => format!("Reset failed: {e}"),
+                        };
+                        ui.status_message = Some((toast, std::time::Instant::now()));
+                        {
+                            let mut st = state.blocking_write();
+                            st.register_pane(focused_pane_id.clone());
+                            st.insert_placeholder_session(focused_pane_id.clone(), cwd);
+                        }
+                        ui.mode = UiMode::Normal;
+                    }
+                }
             }
 
             // Keep pane_display_names in sync with display_names
@@ -3905,6 +4011,14 @@ fn render_overlays(
     }
     if ui.mode == UiMode::QuitConfirm {
         render_quit_confirm(frame, ui.quit_confirm_selected, palette);
+    }
+    if ui.mode == UiMode::ResetConfirm {
+        render_reset_confirm(
+            frame,
+            ui.reset_confirm_selected,
+            ui.reset_confirm_streaming,
+            palette,
+        );
     }
 }
 
@@ -4367,6 +4481,78 @@ fn render_quit_confirm(frame: &mut Frame, selected: usize, palette: ColorPalette
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(palette.terminal_bg));
+    let paragraph = Paragraph::new(text).block(block);
+    frame.render_widget(paragraph, popup_area);
+}
+
+fn render_reset_confirm(
+    frame: &mut Frame,
+    selected: usize,
+    streaming: bool,
+    palette: ColorPalette,
+) {
+    let area = frame.area();
+    let popup_height = if streaming { 11u16 } else { 9u16 };
+    let popup_width = 54u16.min(area.width.saturating_sub(4));
+    let popup_height = popup_height.min(area.height.saturating_sub(4));
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    frame.render_widget(Clear, popup_area);
+
+    let options = [
+        ("Resume", "[r]esume — continue last session"),
+        ("Fresh", "[f]resh  — start a new session"),
+        ("Cancel", "[esc]   — do nothing"),
+    ];
+
+    let title_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+
+    let mut text = vec![Line::from("")];
+    if streaming {
+        text.push(Line::styled(
+            "  Agent is active. Reset will lose",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+        text.push(Line::styled(
+            "  in-progress output.",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        text.push(Line::styled("  Reset session?", title_style));
+    }
+    text.push(Line::from(""));
+
+    for (i, (label, desc)) in options.iter().enumerate() {
+        let cursor = if i == selected { ">" } else { " " };
+        let style = if i == selected {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        text.push(Line::styled(
+            format!("  {cursor} {label:<7} — {desc}"),
+            style,
+        ));
+    }
+
+    text.push(Line::from(""));
+    text.push(Line::styled(
+        "  Up/Down: navigate  Enter: confirm",
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    let block = Block::default()
+        .title(" Reset Session ")
+        .title_style(title_style)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .style(Style::default().bg(palette.terminal_bg));
