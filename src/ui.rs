@@ -1367,6 +1367,11 @@ fn handle_quit_confirm_key(key: KeyEvent, ui: &mut UiState) -> KeyResult {
 }
 
 fn handle_reset_confirm_key(key: KeyEvent, ui: &mut UiState) -> KeyResult {
+    // Ctrl+C: cancel and return to normal mode (same as Esc)
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        ui.mode = UiMode::Normal;
+        return KeyResult::Continue;
+    }
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             if ui.reset_confirm_selected > 0 {
@@ -3512,6 +3517,7 @@ pub fn run_tui(
                                     SessionStatus::Thinking
                                         | SessionStatus::Working
                                         | SessionStatus::Compacting
+                                        | SessionStatus::WaitingForInput
                                 )
                         });
                         ui.reset_confirm_streaming = is_streaming;
@@ -3552,6 +3558,8 @@ pub fn run_tui(
                         ui.status_message = Some((toast, std::time::Instant::now()));
                         {
                             let mut st = state.blocking_write();
+                            let session_key = format!("pane-{focused_pane_id}");
+                            st.sessions.remove(&session_key);
                             st.register_pane(focused_pane_id.clone());
                             st.insert_placeholder_session(focused_pane_id.clone(), cwd);
                         }
