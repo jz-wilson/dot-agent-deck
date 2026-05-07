@@ -18,6 +18,17 @@ pub enum ProjectConfigError {
     },
 }
 
+/// Identifies which agent process to spawn for resume-flag injection.
+/// Distinct from `event::AgentType`, which classifies live event streams.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpawnAgentType {
+    Claude,
+    OpenCode,
+    Codex,
+    Generic,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProjectConfig {
     #[serde(default)]
@@ -49,6 +60,8 @@ pub struct ModePersistentPane {
     pub name: Option<String>,
     #[serde(default = "default_pane_watch")]
     pub watch: bool,
+    #[serde(default)]
+    pub agent_type: Option<SpawnAgentType>,
 }
 
 fn default_pane_watch() -> bool {
@@ -82,6 +95,8 @@ pub struct OrchestrationRoleConfig {
     pub prompt_template: Option<String>,
     #[serde(default = "default_clear")]
     pub clear: bool,
+    #[serde(default)]
+    pub agent_type: Option<SpawnAgentType>,
 }
 
 fn default_clear() -> bool {
@@ -479,5 +494,84 @@ command = "echo hi"
         let config = load_project_config(dir.path()).unwrap().unwrap();
         assert!(config.modes.iter().any(|m| m.name == "renamed-mode"));
         assert!(!config.modes.iter().any(|m| m.name == "old-name"));
+    }
+
+    #[test]
+    fn pane_agent_type_defaults_to_none() {
+        let toml = r#"
+[[modes]]
+name = "test"
+
+[[modes.panes]]
+command = "echo hi"
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        assert!(config.modes[0].panes[0].agent_type.is_none());
+    }
+
+    #[test]
+    fn pane_agent_type_claude() {
+        let toml = r#"
+[[modes]]
+name = "test"
+
+[[modes.panes]]
+command = "claude"
+agent_type = "claude"
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.modes[0].panes[0].agent_type,
+            Some(SpawnAgentType::Claude)
+        );
+    }
+
+    #[test]
+    fn pane_agent_type_codex() {
+        let toml = r#"
+[[modes]]
+name = "test"
+
+[[modes.panes]]
+command = "codex"
+agent_type = "codex"
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.modes[0].panes[0].agent_type,
+            Some(SpawnAgentType::Codex)
+        );
+    }
+
+    #[test]
+    fn orchestration_role_agent_type_opencode() {
+        let toml = r#"
+[[orchestrations]]
+name = "test"
+
+[[orchestrations.roles]]
+name = "coder"
+command = "opencode"
+agent_type = "open_code"
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.orchestrations[0].roles[0].agent_type,
+            Some(SpawnAgentType::OpenCode)
+        );
+    }
+
+    #[test]
+    fn orchestration_role_agent_type_defaults_to_none() {
+        let toml = r#"
+[[orchestrations]]
+name = "test"
+
+[[orchestrations.roles]]
+name = "worker"
+command = "claude"
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        assert!(config.orchestrations[0].roles[0].agent_type.is_none());
     }
 }

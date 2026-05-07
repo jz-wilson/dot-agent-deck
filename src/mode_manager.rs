@@ -498,6 +498,7 @@ mod tests {
                 command: "kubectl get pods -w".to_string(),
                 name: Some("Pods".to_string()),
                 watch: false,
+                agent_type: None,
             }],
             rules: vec![
                 ModeRule {

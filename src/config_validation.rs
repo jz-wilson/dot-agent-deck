@@ -211,6 +211,7 @@ mod tests {
             },
             prompt_template: None,
             clear: true,
+            agent_type: None,
         }
     }
 
@@ -450,6 +451,7 @@ mod tests {
                     description: None,
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
             ],
         )]);
@@ -474,6 +476,7 @@ mod tests {
                     description: Some("malicious".to_string()),
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
             ],
         )]);
@@ -498,6 +501,7 @@ mod tests {
                     description: Some("slashy".to_string()),
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
             ],
         )]);
@@ -522,6 +526,7 @@ mod tests {
                     description: Some("backslash".to_string()),
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
             ],
         )]);

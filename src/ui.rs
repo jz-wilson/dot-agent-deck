@@ -5627,6 +5627,7 @@ mod tests {
                     description: None,
                     prompt_template: Some("You coordinate the team.".to_string()),
                     clear: true,
+                    agent_type: None,
                 },
                 OrchestrationRoleConfig {
                     name: "coder".to_string(),
@@ -5635,6 +5636,7 @@ mod tests {
                     description: Some("Implements code changes".to_string()),
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
                 OrchestrationRoleConfig {
                     name: "reviewer".to_string(),
@@ -5643,6 +5645,7 @@ mod tests {
                     description: None,
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
             ],
         };
@@ -5678,6 +5681,7 @@ mod tests {
                     description: None,
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
                 OrchestrationRoleConfig {
                     name: "worker".to_string(),
@@ -5686,6 +5690,7 @@ mod tests {
                     description: Some("Does work".to_string()),
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
             ],
         };
@@ -5710,6 +5715,7 @@ mod tests {
                     description: None,
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
                 OrchestrationRoleConfig {
                     name: "worker".to_string(),
@@ -5718,6 +5724,7 @@ mod tests {
                     description: Some("Does work".to_string()),
                     prompt_template: None,
                     clear: true,
+                    agent_type: None,
                 },
             ],
         };
@@ -6804,6 +6811,7 @@ mod tests {
                     description: None,
                     prompt_template: Some("Code.".to_string()),
                     clear: true,
+                    agent_type: None,
                 },
                 OrchestrationRoleConfig {
                     name: "reviewer".to_string(),
@@ -6812,6 +6820,7 @@ mod tests {
                     description: Some("Reviews code".to_string()),
                     prompt_template: Some("Review.".to_string()),
                     clear: true,
+                    agent_type: None,
                 },
             ],
         }
@@ -7604,6 +7613,7 @@ mod tests {
                 description: None,
                 prompt_template: None,
                 clear: true,
+                agent_type: None,
             }],
         };
 
@@ -7781,6 +7791,7 @@ mod tests {
                     description: None,
                     prompt_template: None,
                     clear: false, // orchestrator is never restarted
+                    agent_type: None,
                 },
                 OrchestrationRoleConfig {
                     name: "coder".to_string(),
@@ -7789,6 +7800,7 @@ mod tests {
                     description: Some("Implements code".to_string()),
                     prompt_template: Some("Always run tests.".to_string()),
                     clear,
+                    agent_type: None,
                 },
                 OrchestrationRoleConfig {
                     name: "reviewer".to_string(),
@@ -7797,6 +7809,7 @@ mod tests {
                     description: Some("Reviews code".to_string()),
                     prompt_template: Some("Check for bugs.".to_string()),
                     clear,
+                    agent_type: None,
                 },
             ],
         }
