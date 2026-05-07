@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use regex::Regex;
 use serde::Deserialize;
 
 pub const CONFIG_FILE_NAME: &str = ".dot-agent-deck.toml";
@@ -18,12 +19,70 @@ pub enum ProjectConfigError {
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// Configuration for the card footer metadata overlay (git branch + work-item ID).
+#[derive(Debug)]
+pub struct CardMetadataConfig {
+    /// Compiled regex; capture group 1 is displayed as the work-item ID.
+    /// `None` if no regex configured or compilation failed.
+    pub branch_id_regex: Option<Regex>,
+    /// Prefix prepended to the captured ID, e.g. "" or "#" or "AB#".
+    pub id_prefix: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct CardMetadataRaw {
+    #[serde(default = "default_branch_id_regex")]
+    branch_id_regex: String,
+    #[serde(default)]
+    id_prefix: String,
+}
+
+fn default_branch_id_regex() -> String {
+    r"(?:feature|fix|hotfix|bugfix|chore)[/+\-](\d+)".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct ProjectConfig {
     #[serde(default)]
     pub modes: Vec<ModeConfig>,
     #[serde(default)]
     pub orchestrations: Vec<OrchestrationConfig>,
+    #[serde(default, rename = "card_metadata")]
+    card_metadata_raw: Option<CardMetadataRaw>,
+}
+
+impl ProjectConfig {
+    /// Constructs a `ProjectConfig` from explicit modes and orchestrations,
+    /// with no card_metadata section. Used in tests and validation helpers.
+    #[cfg(test)]
+    pub(crate) fn from_parts(
+        modes: Vec<ModeConfig>,
+        orchestrations: Vec<OrchestrationConfig>,
+    ) -> Self {
+        Self {
+            modes,
+            orchestrations,
+            card_metadata_raw: None,
+        }
+    }
+
+    pub fn card_metadata(&self) -> Option<CardMetadataConfig> {
+        let raw = self.card_metadata_raw.as_ref()?;
+        if raw.branch_id_regex.is_empty() {
+            return None;
+        }
+        let compiled = match Regex::new(&raw.branch_id_regex) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                tracing::warn!(regex = %raw.branch_id_regex, error = %e, "card_metadata.branch_id_regex is invalid — feature disabled");
+                None
+            }
+        };
+        Some(CardMetadataConfig {
+            branch_id_regex: compiled,
+            id_prefix: raw.id_prefix.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -479,5 +538,60 @@ command = "echo hi"
         let config = load_project_config(dir.path()).unwrap().unwrap();
         assert!(config.modes.iter().any(|m| m.name == "renamed-mode"));
         assert!(!config.modes.iter().any(|m| m.name == "old-name"));
+    }
+
+    #[test]
+    fn card_metadata_absent_returns_none() {
+        let toml = r#"
+[[modes]]
+name = "dev"
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        assert!(config.card_metadata().is_none());
+    }
+
+    #[test]
+    fn card_metadata_default_regex_compiles() {
+        let toml = r#"
+[card_metadata]
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        let meta = config.card_metadata().expect("should return Some");
+        assert!(meta.branch_id_regex.is_some());
+    }
+
+    #[test]
+    fn card_metadata_custom_regex() {
+        let toml = r#"
+[card_metadata]
+branch_id_regex = "AB-(\\d+)"
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        let meta = config.card_metadata().expect("should return Some");
+        assert!(meta.branch_id_regex.is_some());
+    }
+
+    #[test]
+    fn card_metadata_invalid_regex_returns_none_field() {
+        let toml = r#"
+[card_metadata]
+branch_id_regex = "["
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        let meta = config
+            .card_metadata()
+            .expect("should return Some even for invalid regex");
+        assert!(meta.branch_id_regex.is_none());
+    }
+
+    #[test]
+    fn card_metadata_id_prefix_parsed() {
+        let toml = r#"
+[card_metadata]
+id_prefix = "AB#"
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        let meta = config.card_metadata().unwrap();
+        assert_eq!(meta.id_prefix, "AB#");
     }
 }

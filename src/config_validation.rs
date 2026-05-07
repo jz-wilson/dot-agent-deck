@@ -193,10 +193,7 @@ mod tests {
     };
 
     fn make_config(modes: Vec<ModeConfig>) -> ProjectConfig {
-        ProjectConfig {
-            modes,
-            orchestrations: vec![],
-        }
+        ProjectConfig::from_parts(modes, vec![])
     }
 
     fn make_role(name: &str, start: bool) -> OrchestrationRoleConfig {
@@ -222,10 +219,7 @@ mod tests {
     }
 
     fn make_orch_config(orchestrations: Vec<OrchestrationConfig>) -> ProjectConfig {
-        ProjectConfig {
-            modes: vec![],
-            orchestrations,
-        }
+        ProjectConfig::from_parts(vec![], orchestrations)
     }
 
     fn make_mode(name: &str, rules: Vec<ModeRule>) -> ModeConfig {
