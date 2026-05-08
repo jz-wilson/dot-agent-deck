@@ -4775,6 +4775,7 @@ fn render_help_overlay(frame: &mut Frame, active_mode_name: Option<&str>, palett
         Line::from(format!("  {MOD_KEY}+d           Command mode (dashboard)")),
         Line::from(format!("  {MOD_KEY}+n           Create new pane")),
         Line::from(format!("  {MOD_KEY}+w           Close selected pane")),
+        Line::from(format!("  {MOD_KEY}+y           Duplicate selected pane")),
         Line::from(format!(
             "  {MOD_KEY}+t           Toggle layout (stacked/tiled)"
         )),
