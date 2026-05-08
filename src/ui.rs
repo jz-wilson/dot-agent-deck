@@ -718,6 +718,16 @@ fn filter_sessions<'a>(state: &'a AppState, ui: &UiState) -> Vec<(&'a String, &'
     sessions
 }
 
+fn find_duplicate_source<'a>(
+    selected_index: usize,
+    filtered: &[(&String, &SessionState)],
+    pane_metadata: &'a HashMap<String, config::SavedPane>,
+) -> Option<&'a config::SavedPane> {
+    let (_, session) = filtered.get(selected_index)?;
+    let pane_id = session.pane_id.as_ref()?;
+    pane_metadata.get(pane_id)
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator prompt construction
 // ---------------------------------------------------------------------------
