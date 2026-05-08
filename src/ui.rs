@@ -2854,6 +2854,7 @@ pub fn run_tui(
 
             // 1..9 in Normal mode: jump to card N and focus its pane
             let mut shortcut_handled = false;
+            let mut duplicate_req: Option<NewPaneRequest> = None;
             if ui.mode == UiMode::Normal
                 && let KeyCode::Char(c @ '1'..='9') = key.code
                 && key.modifiers == KeyModifiers::NONE
@@ -3015,6 +3016,29 @@ pub fn run_tui(
                                 format!("Closed pane {closed_pane_id}"),
                                 std::time::Instant::now(),
                             ));
+                        }
+                        shortcut_handled = true;
+                    }
+                    // Ctrl+y: duplicate selected pane (yank/copy)
+                    KeyCode::Char('y') => {
+                        if let Some(saved) =
+                            find_duplicate_source(ui.selected_index, &filtered, &ui.pane_metadata)
+                        {
+                            let mode_config = saved.mode.as_ref().and_then(|mode_name| {
+                                load_project_config(Path::new(&saved.dir))
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|cfg| {
+                                        cfg.modes.into_iter().find(|m| &m.name == mode_name)
+                                    })
+                            });
+                            duplicate_req = Some(NewPaneRequest {
+                                dir: PathBuf::from(&saved.dir),
+                                name: saved.name.clone(),
+                                command: saved.command.clone(),
+                                mode_config,
+                                orchestration_config: None,
+                            });
                         }
                         shortcut_handled = true;
                     }
@@ -3184,7 +3208,9 @@ pub fn run_tui(
             }
 
             // Mode-specific key handling (skip if a global shortcut was handled).
-            let result = if shortcut_handled {
+            let result = if let Some(req) = duplicate_req {
+                KeyResult::NewPane(req)
+            } else if shortcut_handled {
                 KeyResult::Continue
             } else {
                 match ui.mode {
