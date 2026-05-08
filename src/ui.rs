@@ -8560,4 +8560,79 @@ mod tests {
         assert_eq!(ui.pending_dispatches[0].pane_id, *orchestrator_pane);
         assert!(ui.pending_dispatches[0].prompt.contains("coder"));
     }
+
+    // ---------------------------------------------------------------------------
+    // find_duplicate_source tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_find_duplicate_source_happy_path() {
+        let mut state = AppState::default();
+        state.insert_placeholder_session("42".to_string(), Some("/repo".to_string()));
+
+        let mut pane_metadata = HashMap::new();
+        pane_metadata.insert(
+            "42".to_string(),
+            config::SavedPane {
+                dir: "/repo".to_string(),
+                name: "my-repo".to_string(),
+                command: "claude".to_string(),
+                mode: None,
+            },
+        );
+
+        let ui = default_ui();
+        let filtered = filter_sessions(&state, &ui);
+        let result = find_duplicate_source(0, &filtered, &pane_metadata);
+
+        assert!(result.is_some());
+        let saved = result.unwrap();
+        assert_eq!(saved.dir, "/repo");
+        assert_eq!(saved.name, "my-repo");
+        assert_eq!(saved.command, "claude");
+        assert!(saved.mode.is_none());
+    }
+
+    #[test]
+    fn test_find_duplicate_source_no_pane_id() {
+        let mut state = AppState::default();
+        state.apply_event(AgentEvent {
+            session_id: "sess-1".to_string(),
+            agent_type: AgentType::ClaudeCode,
+            event_type: EventType::SessionStart,
+            tool_name: None,
+            tool_detail: None,
+            cwd: None,
+            timestamp: Utc::now(),
+            user_prompt: None,
+            metadata: HashMap::new(),
+            pane_id: None,
+        });
+
+        let ui = default_ui();
+        let filtered = filter_sessions(&state, &ui);
+        let pane_metadata: HashMap<String, config::SavedPane> = HashMap::new();
+        let result = find_duplicate_source(0, &filtered, &pane_metadata);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_duplicate_source_missing_metadata() {
+        let mut state = AppState::default();
+        state.insert_placeholder_session("99".to_string(), None);
+
+        let ui = default_ui();
+        let filtered = filter_sessions(&state, &ui);
+        let pane_metadata: HashMap<String, config::SavedPane> = HashMap::new();
+        let result = find_duplicate_source(0, &filtered, &pane_metadata);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_duplicate_source_out_of_bounds() {
+        let filtered: Vec<(&String, &SessionState)> = vec![];
+        let pane_metadata: HashMap<String, config::SavedPane> = HashMap::new();
+        let result = find_duplicate_source(0, &filtered, &pane_metadata);
+        assert!(result.is_none());
+    }
 }
