@@ -78,21 +78,34 @@ impl ProjectConfig {
     }
 
     pub fn card_metadata(&self) -> Option<CardMetadataConfig> {
-        let raw = self.card_metadata_raw.as_ref()?;
-        if raw.branch_id_regex.is_empty() {
-            return None;
-        }
-        let compiled = match Regex::new(&raw.branch_id_regex) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                tracing::warn!(regex = %raw.branch_id_regex, error = %e, "card_metadata.branch_id_regex is invalid — feature disabled");
-                None
+        match &self.card_metadata_raw {
+            None => {
+                // No [card_metadata] section — synthesize default config so the branch
+                // footer renders in every repo without requiring explicit configuration.
+                let regex = Regex::new(&default_branch_id_regex()).ok();
+                Some(CardMetadataConfig {
+                    branch_id_regex: regex,
+                    id_prefix: String::new(),
+                })
             }
-        };
-        Some(CardMetadataConfig {
-            branch_id_regex: compiled,
-            id_prefix: raw.id_prefix.clone(),
-        })
+            Some(raw) => {
+                if raw.branch_id_regex.is_empty() {
+                    // Empty string is the explicit opt-out — footer suppressed.
+                    return None;
+                }
+                let compiled = match Regex::new(&raw.branch_id_regex) {
+                    Ok(r) => Some(r),
+                    Err(e) => {
+                        tracing::warn!(regex = %raw.branch_id_regex, error = %e, "card_metadata.branch_id_regex is invalid — feature disabled");
+                        None
+                    }
+                };
+                Some(CardMetadataConfig {
+                    branch_id_regex: compiled,
+                    id_prefix: raw.id_prefix.clone(),
+                })
+            }
+        }
     }
 }
 
@@ -635,10 +648,27 @@ command = "claude"
     }
 
     #[test]
-    fn card_metadata_absent_returns_none() {
+    fn card_metadata_absent_returns_default_config() {
         let toml = r#"
 [[modes]]
 name = "dev"
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        let meta = config
+            .card_metadata()
+            .expect("should return Some when section absent");
+        assert!(
+            meta.branch_id_regex.is_some(),
+            "default regex should compile"
+        );
+        assert_eq!(meta.id_prefix, "");
+    }
+
+    #[test]
+    fn card_metadata_empty_regex_opts_out() {
+        let toml = r#"
+[card_metadata]
+branch_id_regex = ""
 "#;
         let config: ProjectConfig = toml::from_str(toml).unwrap();
         assert!(config.card_metadata().is_none());

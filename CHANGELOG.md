@@ -22,6 +22,9 @@
 
 ### Added
 
+- **Card branch footer now on by default**
+  Dashboard cards now show a `Branch: <name>` footer in every repo, even when `.dot-agent-deck.toml` has no `[card_metadata]` section. Previously the footer only appeared when an explicit `[card_metadata]` table was present. The default regex (`(?:feature|fix|hotfix|bugfix|chore)[/+\-](\d+)`) extracts a work-item ID suffix from matching branch names. To suppress the footer in a specific repo, add `[card_metadata]` with `branch_id_regex = ""`. The `[card_metadata]` section remains supported for customising the regex or `id_prefix`.
+
   Add session reset (`Ctrl+D` → `R`) to kill and respawn the focused pane's child process. Supports fresh or resume mode; Claude Code and OpenCode resume via `--continue`, Codex via `codex resume --last`. Shows a warning dialog when the agent is actively streaming.
 
 
