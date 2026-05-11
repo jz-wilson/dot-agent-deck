@@ -148,6 +148,7 @@ struct TabBarInfo {
     show: bool,
     labels: Vec<String>,
     active_index: usize,
+    git_branch: Option<String>,
 }
 
 struct DirPickerState {
@@ -2213,6 +2214,7 @@ pub fn run_tui(
 
         // Refresh git branches for sessions with stale data (gated by 30s threshold).
         state.blocking_write().refresh_stale_branches();
+        tab_manager.refresh_stale_tab_branches();
 
         let snapshot = state.blocking_read().clone();
 
@@ -2396,6 +2398,7 @@ pub fn run_tui(
             show: tab_manager.show_tab_bar(),
             labels: tab_bar_labels,
             active_index: tab_manager.active_index(),
+            git_branch: tab_manager.active_tab().git_branch().map(String::from),
         };
         terminal.draw(|frame| {
             render_frame(
@@ -3812,6 +3815,7 @@ fn render_frame(
             active_mode_name,
             tab_bar.show,
             *focused_side_pane_index,
+            tab_bar.git_branch.as_deref(),
         );
         return;
     }
@@ -3867,7 +3871,15 @@ fn render_frame(
         .style(Style::default().fg(palette.text_secondary))
         .centered();
         frame.render_widget(msg, vertical[1]);
-        render_bottom_bar(frame, ui, hints_area, has_pane_control, tab_bar.show, false);
+        render_bottom_bar(
+            frame,
+            ui,
+            hints_area,
+            has_pane_control,
+            tab_bar.show,
+            false,
+            tab_bar.git_branch.as_deref(),
+        );
 
         if let Some(right) = panes_area {
             ui.focused_pane_rect = render_terminal_panes(
@@ -3955,7 +3967,15 @@ fn render_frame(
             active_mode_name,
             palette,
         );
-        render_bottom_bar(frame, ui, hints_area, has_pane_control, tab_bar.show, false);
+        render_bottom_bar(
+            frame,
+            ui,
+            hints_area,
+            has_pane_control,
+            tab_bar.show,
+            false,
+            tab_bar.git_branch.as_deref(),
+        );
         // Still render live terminal panes even when filter matches zero sessions.
         if let Some(right) = panes_area {
             ui.focused_pane_rect = render_terminal_panes(
@@ -4046,7 +4066,15 @@ fn render_frame(
     );
 
     // Full-width hints bar
-    render_bottom_bar(frame, ui, hints_area, has_pane_control, tab_bar.show, false);
+    render_bottom_bar(
+        frame,
+        ui,
+        hints_area,
+        has_pane_control,
+        tab_bar.show,
+        false,
+        tab_bar.git_branch.as_deref(),
+    );
 
     // Render terminal panes on the right side
     if let Some(right) = panes_area {
@@ -4285,6 +4313,7 @@ fn render_mode_tab(
     active_mode_name: Option<&str>,
     show_tab_bar: bool,
     focused_side_pane_index: Option<usize>,
+    git_branch: Option<&str>,
 ) {
     let palette = ui.palette;
 
@@ -4356,7 +4385,15 @@ fn render_mode_tab(
     }
 
     // Full-width hints bar
-    render_bottom_bar(frame, ui, hints_area, has_pane_control, show_tab_bar, true);
+    render_bottom_bar(
+        frame,
+        ui,
+        hints_area,
+        has_pane_control,
+        show_tab_bar,
+        true,
+        git_branch,
+    );
 
     render_overlays(frame, ui, active_mode_name, palette);
 }
@@ -4433,6 +4470,7 @@ fn render_bottom_bar(
     has_pane_control: bool,
     show_tab_bar: bool,
     is_mode_tab: bool,
+    git_branch: Option<&str>,
 ) {
     match ui.mode {
         UiMode::Filter => {
@@ -4485,10 +4523,17 @@ fn render_bottom_bar(
                 } else {
                     format!("?: help  1-9: jump  {MOD_KEY}+c: quit{tab_hint}")
                 };
-                let mut spans = vec![Span::styled(
+                let mut spans = Vec::new();
+                if let Some(branch) = git_branch {
+                    spans.push(Span::styled(
+                        format!("\u{2387} {branch} \u{2502} "),
+                        Style::default().fg(ui.palette.text_muted),
+                    ));
+                }
+                spans.push(Span::styled(
                     hints,
                     Style::default().fg(ui.palette.text_secondary),
-                )];
+                ));
                 if let Some(ref latest) = ui.update_available {
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(
@@ -5722,6 +5767,7 @@ mod tests {
                         show: false,
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
+                        git_branch: None,
                     },
                     None,
                 )
@@ -5790,6 +5836,7 @@ mod tests {
                         show: false,
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
+                        git_branch: None,
                     },
                     None,
                 )
@@ -5908,6 +5955,7 @@ mod tests {
                         show: false,
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
+                        git_branch: None,
                     },
                     None,
                 )
@@ -6131,6 +6179,7 @@ mod tests {
                         show: false,
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
+                        git_branch: None,
                     },
                     None,
                 )

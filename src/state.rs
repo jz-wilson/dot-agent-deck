@@ -375,7 +375,7 @@ pub fn refresh_git_branch(session: &mut SessionState) {
     session.git_branch_refreshed_at = Some(now);
 }
 
-fn run_git_branch(cwd: &str) -> String {
+pub(crate) fn run_git_branch(cwd: &str) -> String {
     use std::process::Command;
 
     let output = Command::new("git")
