@@ -18,6 +18,12 @@
   Session cards now keep their "Needs Input" status when a concurrent subagent fires a tool event. Previously, a subagent's `PreToolUse` would flip the card back to "Working" while the user was looking at an active permission prompt — making the prompt easy to miss when several agents were running in parallel.
   The dashboard now preserves `WaitingForInput` across `ToolStart` events from concurrent subagents while still updating the active-tool display, so the prompt card stays visible until the user responds.
 
+## [0.2.0] - 2026-05-11
+
+### Added
+
+  Add session reset (`Ctrl+D` → `R`) to kill and respawn the focused pane's child process. Supports fresh or resume mode; Claude Code and OpenCode resume via `--continue`, Codex via `codex resume --last`. Shows a warning dialog when the agent is actively streaming.
+
 
 
 ## [0.24.5] - 2026-05-06

@@ -1,1 +1,0 @@
-Add session reset (`Ctrl+D` → `R`) to kill and respawn the focused pane's child process. Supports fresh or resume mode; Claude Code and OpenCode resume via `--continue`, Codex via `codex resume --last`. Shows a warning dialog when the agent is actively streaming.
