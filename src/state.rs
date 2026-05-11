@@ -58,6 +58,8 @@ pub struct SessionState {
     pub git_branch: Option<String>,
     /// Last time the branch was refreshed.
     pub git_branch_refreshed_at: Option<DateTime<Utc>>,
+    /// Linked git worktree name, or None when on the main checkout / not a worktree.
+    pub git_worktree: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -131,6 +133,7 @@ impl AppState {
                 pane_id: Some(pane_id),
                 git_branch: None,
                 git_branch_refreshed_at: None,
+                git_worktree: None,
             },
         );
     }
@@ -280,6 +283,7 @@ impl AppState {
                 pane_id: event.pane_id.clone(),
                 git_branch: None,
                 git_branch_refreshed_at: None,
+                git_worktree: None,
             });
 
         session.last_activity = event.timestamp;
@@ -372,6 +376,7 @@ pub fn refresh_git_branch(session: &mut SessionState) {
 
     let branch = run_git_branch(&cwd);
     session.git_branch = Some(branch);
+    session.git_worktree = run_git_worktree_name(&cwd);
     session.git_branch_refreshed_at = Some(now);
 }
 
@@ -408,6 +413,40 @@ pub(crate) fn run_git_branch(cwd: &str) -> String {
                 .unwrap_or_else(|| cwd.to_string())
         }
     }
+}
+
+/// Detect whether `cwd` is inside a linked git worktree.
+/// Returns the worktree's directory name when `cwd` is in a linked worktree,
+/// or `None` for the main checkout / non-git directories.
+///
+/// Git stores linked worktrees at `<common>/worktrees/<name>`, so when
+/// `--absolute-git-dir` differs from `--git-common-dir` we are in a linked
+/// worktree and the worktree name is the basename of `--absolute-git-dir`.
+pub(crate) fn run_git_worktree_name(cwd: &str) -> Option<String> {
+    use std::process::Command;
+
+    let run = |arg: &str| {
+        Command::new("git")
+            .args(["-C", cwd, "rev-parse", arg])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+
+    let git_dir = run("--absolute-git-dir")?;
+    let common_dir = run("--git-common-dir")?;
+
+    let git_dir_canon = std::fs::canonicalize(&git_dir).ok()?;
+    let common_canon = std::fs::canonicalize(&common_dir).ok()?;
+
+    if git_dir_canon == common_canon {
+        return None;
+    }
+
+    git_dir_canon
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -1091,6 +1130,7 @@ mod tests {
             pane_id: None,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         };
 
         refresh_git_branch(&mut session);
@@ -1119,6 +1159,7 @@ mod tests {
             pane_id: None,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         };
 
         assert!(session.git_branch_refreshed_at.is_none());
@@ -1143,6 +1184,7 @@ mod tests {
             pane_id: None,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         };
 
         assert!(session.git_branch_refreshed_at.is_none());
@@ -1151,5 +1193,101 @@ mod tests {
         assert!(session.git_branch_refreshed_at.is_some());
         // Branch remains None since there is no cwd to inspect.
         assert!(session.git_branch.is_none());
+    }
+
+    #[test]
+    fn run_git_worktree_name_main_checkout_is_none() {
+        let repo_root = env!("CARGO_MANIFEST_DIR");
+        assert_eq!(run_git_worktree_name(repo_root), None);
+    }
+
+    #[test]
+    fn run_git_worktree_name_non_git_dir_is_none() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        assert_eq!(run_git_worktree_name(&path), None);
+    }
+
+    #[test]
+    fn run_git_worktree_name_linked_worktree_returns_basename() {
+        use std::process::Command;
+        use tempfile::TempDir;
+
+        let source_repo = env!("CARGO_MANIFEST_DIR");
+        let tmp = TempDir::new().unwrap();
+        let wt_path = tmp.path().join("dad-wt-unit-test");
+        let branch_name = format!(
+            "dad-wt-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let add = Command::new("git")
+            .args([
+                "-C",
+                source_repo,
+                "worktree",
+                "add",
+                "-b",
+                &branch_name,
+                wt_path.to_str().unwrap(),
+            ])
+            .output()
+            .expect("spawn git worktree add");
+        if !add.status.success() {
+            panic!(
+                "git worktree add failed: {}",
+                String::from_utf8_lossy(&add.stderr)
+            );
+        }
+
+        let result = run_git_worktree_name(wt_path.to_str().unwrap());
+
+        // Clean up worktree and branch regardless of assertion outcome.
+        let _ = Command::new("git")
+            .args([
+                "-C",
+                source_repo,
+                "worktree",
+                "remove",
+                "--force",
+                wt_path.to_str().unwrap(),
+            ])
+            .output();
+        let _ = Command::new("git")
+            .args(["-C", source_repo, "branch", "-D", &branch_name])
+            .output();
+
+        assert_eq!(result.as_deref(), Some("dad-wt-unit-test"));
+    }
+
+    #[test]
+    fn refresh_git_branch_populates_worktree_on_main_checkout() {
+        let repo_root = env!("CARGO_MANIFEST_DIR").to_string();
+        let mut session = SessionState {
+            session_id: "wt-branch".to_string(),
+            agent_type: crate::event::AgentType::None,
+            cwd: Some(repo_root),
+            status: SessionStatus::Idle,
+            active_tool: None,
+            started_at: Utc::now(),
+            last_activity: Utc::now(),
+            recent_events: VecDeque::new(),
+            tool_count: 0,
+            last_user_prompt: None,
+            first_prompts: Vec::new(),
+            pane_id: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
+            git_worktree: None,
+        };
+
+        refresh_git_branch(&mut session);
+        assert!(session.git_branch.is_some());
+        assert!(session.git_branch_refreshed_at.is_some());
+        assert!(session.git_worktree.is_none());
     }
 }

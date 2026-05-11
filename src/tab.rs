@@ -65,6 +65,7 @@ pub enum Tab {
         focused_side_pane_index: Option<usize>,
         git_branch: Option<String>,
         git_branch_refreshed_at: Option<DateTime<Utc>>,
+        git_worktree: Option<String>,
     },
     Orchestration {
         id: TabId,
@@ -85,6 +86,7 @@ pub enum Tab {
         status: OrchestrationStatus,
         git_branch: Option<String>,
         git_branch_refreshed_at: Option<DateTime<Utc>>,
+        git_worktree: Option<String>,
     },
 }
 
@@ -109,6 +111,15 @@ impl Tab {
             Tab::Dashboard => None,
             Tab::Mode { git_branch, .. } | Tab::Orchestration { git_branch, .. } => {
                 git_branch.as_deref()
+            }
+        }
+    }
+
+    pub fn git_worktree(&self) -> Option<&str> {
+        match self {
+            Tab::Dashboard => None,
+            Tab::Mode { git_worktree, .. } | Tab::Orchestration { git_worktree, .. } => {
+                git_worktree.as_deref()
             }
         }
     }
@@ -200,6 +211,7 @@ impl TabManager {
             focused_side_pane_index: None,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         });
 
         let index = self.tabs.len() - 1;
@@ -274,6 +286,7 @@ impl TabManager {
             status: OrchestrationStatus::WaitingForOrchestrator,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         });
 
         let index = self.tabs.len() - 1;
@@ -397,9 +410,10 @@ impl TabManager {
         let now = Utc::now();
         let threshold = chrono::Duration::seconds(30);
         for tab in &mut self.tabs {
-            let (cwd_owned, refreshed_at, git_branch): (
+            let (cwd_owned, refreshed_at, git_branch, git_worktree): (
                 String,
                 &mut Option<DateTime<Utc>>,
+                &mut Option<String>,
                 &mut Option<String>,
             ) = match tab {
                 Tab::Dashboard => continue,
@@ -407,14 +421,26 @@ impl TabManager {
                     cwd,
                     git_branch,
                     git_branch_refreshed_at,
+                    git_worktree,
                     ..
-                } => (cwd.clone(), git_branch_refreshed_at, git_branch),
+                } => (
+                    cwd.clone(),
+                    git_branch_refreshed_at,
+                    git_branch,
+                    git_worktree,
+                ),
                 Tab::Orchestration {
                     cwd,
                     git_branch,
                     git_branch_refreshed_at,
+                    git_worktree,
                     ..
-                } => (cwd.clone(), git_branch_refreshed_at, git_branch),
+                } => (
+                    cwd.clone(),
+                    git_branch_refreshed_at,
+                    git_branch,
+                    git_worktree,
+                ),
             };
             let needs_refresh = match *refreshed_at {
                 None => true,
@@ -422,6 +448,7 @@ impl TabManager {
             };
             if needs_refresh {
                 *git_branch = Some(crate::state::run_git_branch(&cwd_owned));
+                *git_worktree = crate::state::run_git_worktree_name(&cwd_owned);
                 *refreshed_at = Some(now);
             }
         }
@@ -833,6 +860,7 @@ mod tests {
                 pane_id: None,
                 git_branch: None,
                 git_branch_refreshed_at: None,
+                git_worktree: None,
             },
         )
     }
@@ -896,6 +924,7 @@ mod tests {
                 pane_id: None,
                 git_branch: None,
                 git_branch_refreshed_at: None,
+                git_worktree: None,
             },
         );
         let mut last_routed = HashMap::new();
@@ -1066,6 +1095,8 @@ mod tests {
         let tab = tm.active_tab();
         assert!(tab.git_branch().is_some());
         assert!(!tab.git_branch().unwrap().is_empty());
+        // Main checkout — no linked worktree.
+        assert!(tab.git_worktree().is_none());
     }
 
     #[test]

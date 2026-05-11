@@ -149,6 +149,32 @@ struct TabBarInfo {
     labels: Vec<String>,
     active_index: usize,
     git_branch: Option<String>,
+    git_worktree: Option<String>,
+}
+
+/// Select the branch + worktree to display in the status bar.
+/// Mode / Orchestration tabs use their own cached values; Dashboard falls back
+/// to the currently focused session.
+fn status_bar_git(
+    active: &Tab,
+    focused: Option<&SessionState>,
+) -> (Option<String>, Option<String>) {
+    match active {
+        Tab::Mode {
+            git_branch,
+            git_worktree,
+            ..
+        }
+        | Tab::Orchestration {
+            git_branch,
+            git_worktree,
+            ..
+        } => (git_branch.clone(), git_worktree.clone()),
+        Tab::Dashboard => match focused {
+            Some(s) if s.git_branch.is_some() => (s.git_branch.clone(), s.git_worktree.clone()),
+            _ => (None, None),
+        },
+    }
 }
 
 struct DirPickerState {
@@ -2394,11 +2420,15 @@ pub fn run_tui(
                 },
             })
             .collect();
+        let focused_session = filtered.get(ui.selected_index).map(|(_, s)| *s);
+        let (status_branch, status_worktree) =
+            status_bar_git(tab_manager.active_tab(), focused_session);
         let tab_bar_info = TabBarInfo {
             show: tab_manager.show_tab_bar(),
             labels: tab_bar_labels,
             active_index: tab_manager.active_index(),
-            git_branch: tab_manager.active_tab().git_branch().map(String::from),
+            git_branch: status_branch,
+            git_worktree: status_worktree,
         };
         terminal.draw(|frame| {
             render_frame(
@@ -3816,6 +3846,7 @@ fn render_frame(
             tab_bar.show,
             *focused_side_pane_index,
             tab_bar.git_branch.as_deref(),
+            tab_bar.git_worktree.as_deref(),
         );
         return;
     }
@@ -3879,6 +3910,7 @@ fn render_frame(
             tab_bar.show,
             false,
             tab_bar.git_branch.as_deref(),
+            tab_bar.git_worktree.as_deref(),
         );
 
         if let Some(right) = panes_area {
@@ -3975,6 +4007,7 @@ fn render_frame(
             tab_bar.show,
             false,
             tab_bar.git_branch.as_deref(),
+            tab_bar.git_worktree.as_deref(),
         );
         // Still render live terminal panes even when filter matches zero sessions.
         if let Some(right) = panes_area {
@@ -4074,6 +4107,7 @@ fn render_frame(
         tab_bar.show,
         false,
         tab_bar.git_branch.as_deref(),
+        tab_bar.git_worktree.as_deref(),
     );
 
     // Render terminal panes on the right side
@@ -4314,6 +4348,7 @@ fn render_mode_tab(
     show_tab_bar: bool,
     focused_side_pane_index: Option<usize>,
     git_branch: Option<&str>,
+    git_worktree: Option<&str>,
 ) {
     let palette = ui.palette;
 
@@ -4393,6 +4428,7 @@ fn render_mode_tab(
         show_tab_bar,
         true,
         git_branch,
+        git_worktree,
     );
 
     render_overlays(frame, ui, active_mode_name, palette);
@@ -4463,6 +4499,7 @@ fn render_stats_bar(
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_bottom_bar(
     frame: &mut Frame,
     ui: &UiState,
@@ -4471,6 +4508,7 @@ fn render_bottom_bar(
     show_tab_bar: bool,
     is_mode_tab: bool,
     git_branch: Option<&str>,
+    git_worktree: Option<&str>,
 ) {
     match ui.mode {
         UiMode::Filter => {
@@ -4525,8 +4563,12 @@ fn render_bottom_bar(
                 };
                 let mut spans = Vec::new();
                 if let Some(branch) = git_branch {
+                    let leading = match git_worktree {
+                        Some(wt) => format!("\u{2387} {branch} \u{26BF} {wt} \u{2502} "),
+                        None => format!("\u{2387} {branch} \u{2502} "),
+                    };
                     spans.push(Span::styled(
-                        format!("\u{2387} {branch} \u{2502} "),
+                        leading,
                         Style::default().fg(ui.palette.text_muted),
                     ));
                 }
@@ -5768,6 +5810,7 @@ mod tests {
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
                         git_branch: None,
+                        git_worktree: None,
                     },
                     None,
                 )
@@ -5837,6 +5880,7 @@ mod tests {
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
                         git_branch: None,
+                        git_worktree: None,
                     },
                     None,
                 )
@@ -5889,6 +5933,7 @@ mod tests {
             pane_id: None,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         };
 
         let palette = ColorPalette::dark();
@@ -5956,6 +6001,7 @@ mod tests {
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
                         git_branch: None,
+                        git_worktree: None,
                     },
                     None,
                 )
@@ -6180,6 +6226,7 @@ mod tests {
                         labels: vec!["Dashboard".into()],
                         active_index: 0,
                         git_branch: None,
+                        git_worktree: None,
                     },
                     None,
                 )
@@ -6756,6 +6803,7 @@ mod tests {
             pane_id: None,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         }
     }
 
@@ -6948,6 +6996,7 @@ mod tests {
             pane_id: None,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         };
 
         // Spacious: get all 3
@@ -6982,6 +7031,7 @@ mod tests {
             pane_id: None,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         };
 
         let prompts = collect_recent_prompts(&session, 3);
@@ -7007,6 +7057,7 @@ mod tests {
             pane_id: None,
             git_branch: None,
             git_branch_refreshed_at: None,
+            git_worktree: None,
         };
 
         let prompts = collect_recent_prompts(&session, 3);
@@ -8430,6 +8481,7 @@ mod tests {
                     pane_id: Some(orchestrator_pane.clone()),
                     git_branch: None,
                     git_branch_refreshed_at: None,
+                    git_worktree: None,
                 },
             );
         }
@@ -8504,6 +8556,7 @@ mod tests {
                     pane_id: Some(orchestrator_pane.clone()),
                     git_branch: None,
                     git_branch_refreshed_at: None,
+                    git_worktree: None,
                 },
             );
         }
@@ -8720,5 +8773,88 @@ mod tests {
         let pane_metadata: HashMap<String, config::SavedPane> = HashMap::new();
         let result = find_duplicate_source(0, &filtered, &pane_metadata);
         assert!(result.is_none());
+    }
+
+    fn session_with_git(branch: Option<&str>, worktree: Option<&str>) -> SessionState {
+        let mut s = make_session(SessionStatus::Idle);
+        s.git_branch = branch.map(String::from);
+        s.git_worktree = worktree.map(String::from);
+        s
+    }
+
+    fn mode_tab_with_git(
+        branch: Option<String>,
+        worktree: Option<String>,
+    ) -> (crate::tab::TabManager, Arc<dyn PaneController>) {
+        let pane_ctrl = Arc::new(crate::embedded_pane::EmbeddedPaneController::new());
+        let pane: Arc<dyn PaneController> = pane_ctrl;
+        let mut tm = crate::tab::TabManager::new(Arc::clone(&pane));
+        let mode_config = crate::project_config::ModeConfig {
+            name: "test".to_string(),
+            init_command: None,
+            panes: vec![],
+            rules: vec![],
+            reactive_panes: 3,
+        };
+        tm.open_mode_tab(&mode_config, "/tmp", String::new())
+            .unwrap();
+        if let Tab::Mode {
+            git_branch: b,
+            git_worktree: w,
+            ..
+        } = &mut tm.tabs_mut()[1]
+        {
+            *b = branch;
+            *w = worktree;
+        }
+        (tm, pane)
+    }
+
+    #[test]
+    fn status_bar_git_dashboard_no_focused_returns_none() {
+        assert_eq!(status_bar_git(&Tab::Dashboard, None), (None, None));
+    }
+
+    #[test]
+    fn status_bar_git_dashboard_focused_without_branch_returns_none() {
+        let session = session_with_git(None, Some("wt1"));
+        assert_eq!(
+            status_bar_git(&Tab::Dashboard, Some(&session)),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn status_bar_git_dashboard_uses_focused_session() {
+        let session = session_with_git(Some("feature/123"), Some("feat-123"));
+        assert_eq!(
+            status_bar_git(&Tab::Dashboard, Some(&session)),
+            (
+                Some("feature/123".to_string()),
+                Some("feat-123".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn status_bar_git_mode_tab_uses_tab_values_without_worktree() {
+        let (tm, _pane) = mode_tab_with_git(Some("main".to_string()), None);
+        let session = session_with_git(Some("ignored"), Some("ignored-wt"));
+        let tab = &tm.tabs()[1];
+        assert_eq!(
+            status_bar_git(tab, Some(&session)),
+            (Some("main".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn status_bar_git_mode_tab_overrides_focused_session() {
+        let (tm, _pane) = mode_tab_with_git(Some("x".to_string()), Some("wt1".to_string()));
+        let session = session_with_git(Some("ignored"), Some("ignored-wt"));
+        let tab = &tm.tabs()[1];
+        assert_eq!(
+            status_bar_git(tab, Some(&session)),
+            (Some("x".to_string()), Some("wt1".to_string()))
+        );
     }
 }
