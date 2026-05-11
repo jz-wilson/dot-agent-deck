@@ -63,6 +63,8 @@ pub enum Tab {
         cwd: String,
         /// Which side pane has visual focus in Normal mode. `None` = agent pane.
         focused_side_pane_index: Option<usize>,
+        git_branch: Option<String>,
+        git_branch_refreshed_at: Option<DateTime<Utc>>,
     },
     Orchestration {
         id: TabId,
@@ -81,6 +83,8 @@ pub enum Tab {
         config: OrchestrationConfig,
         /// Tracks whether the orchestration is waiting, delegated, or completed.
         status: OrchestrationStatus,
+        git_branch: Option<String>,
+        git_branch_refreshed_at: Option<DateTime<Utc>>,
     },
 }
 
@@ -90,6 +94,22 @@ impl Tab {
             Tab::Dashboard => "Dashboard",
             Tab::Mode { name, .. } => name,
             Tab::Orchestration { name, .. } => name,
+        }
+    }
+
+    pub fn cwd(&self) -> Option<&str> {
+        match self {
+            Tab::Dashboard => None,
+            Tab::Mode { cwd, .. } | Tab::Orchestration { cwd, .. } => Some(cwd.as_str()),
+        }
+    }
+
+    pub fn git_branch(&self) -> Option<&str> {
+        match self {
+            Tab::Dashboard => None,
+            Tab::Mode { git_branch, .. } | Tab::Orchestration { git_branch, .. } => {
+                git_branch.as_deref()
+            }
         }
     }
 }
@@ -178,6 +198,8 @@ impl TabManager {
             last_routed_timestamp: HashMap::new(),
             cwd: cwd.to_string(),
             focused_side_pane_index: None,
+            git_branch: None,
+            git_branch_refreshed_at: None,
         });
 
         let index = self.tabs.len() - 1;
@@ -250,6 +272,8 @@ impl TabManager {
             orchestrator_prompt,
             config: config.clone(),
             status: OrchestrationStatus::WaitingForOrchestrator,
+            git_branch: None,
+            git_branch_refreshed_at: None,
         });
 
         let index = self.tabs.len() - 1;
@@ -364,6 +388,42 @@ impl TabManager {
             Tab::Dashboard => None,
             Tab::Mode { name, .. } => Some(name),
             Tab::Orchestration { .. } => None,
+        }
+    }
+
+    /// Refresh git_branch for all tabs whose branch is stale (older than 30s).
+    /// Skips Dashboard. Runs git subprocess synchronously (mirrors SessionState refresh).
+    pub fn refresh_stale_tab_branches(&mut self) {
+        let now = Utc::now();
+        let threshold = chrono::Duration::seconds(30);
+        for tab in &mut self.tabs {
+            let (cwd_owned, refreshed_at, git_branch): (
+                String,
+                &mut Option<DateTime<Utc>>,
+                &mut Option<String>,
+            ) = match tab {
+                Tab::Dashboard => continue,
+                Tab::Mode {
+                    cwd,
+                    git_branch,
+                    git_branch_refreshed_at,
+                    ..
+                } => (cwd.clone(), git_branch_refreshed_at, git_branch),
+                Tab::Orchestration {
+                    cwd,
+                    git_branch,
+                    git_branch_refreshed_at,
+                    ..
+                } => (cwd.clone(), git_branch_refreshed_at, git_branch),
+            };
+            let needs_refresh = match *refreshed_at {
+                None => true,
+                Some(t) => (now - t) > threshold,
+            };
+            if needs_refresh {
+                *git_branch = Some(crate::state::run_git_branch(&cwd_owned));
+                *refreshed_at = Some(now);
+            }
         }
     }
 
@@ -994,5 +1054,50 @@ mod tests {
             assert_eq!(tm.tab_index_for_pane(id), Some(1));
         }
         assert_eq!(tm.tab_index_for_pane("nonexistent"), None);
+    }
+
+    #[test]
+    fn refresh_stale_tab_branches_sets_branch_for_mode_tab() {
+        let mut tm = make_manager();
+        let repo_root = env!("CARGO_MANIFEST_DIR");
+        tm.open_mode_tab(&test_config("k8s"), repo_root, String::new())
+            .unwrap();
+        tm.refresh_stale_tab_branches();
+        let tab = tm.active_tab();
+        assert!(tab.git_branch().is_some());
+        assert!(!tab.git_branch().unwrap().is_empty());
+    }
+
+    #[test]
+    fn refresh_stale_tab_branches_respects_30s_threshold() {
+        let mut tm = make_manager();
+        let repo_root = env!("CARGO_MANIFEST_DIR");
+        tm.open_mode_tab(&test_config("k8s"), repo_root, String::new())
+            .unwrap();
+        tm.refresh_stale_tab_branches();
+        let first_ts = match tm.active_tab() {
+            Tab::Mode {
+                git_branch_refreshed_at,
+                ..
+            } => *git_branch_refreshed_at,
+            _ => panic!("expected Mode tab"),
+        };
+        assert!(first_ts.is_some());
+        tm.refresh_stale_tab_branches();
+        let second_ts = match tm.active_tab() {
+            Tab::Mode {
+                git_branch_refreshed_at,
+                ..
+            } => *git_branch_refreshed_at,
+            _ => panic!("expected Mode tab"),
+        };
+        assert_eq!(first_ts, second_ts);
+    }
+
+    #[test]
+    fn refresh_stale_tab_branches_skips_dashboard() {
+        let mut tm = make_manager();
+        tm.refresh_stale_tab_branches();
+        assert!(tm.active_tab().git_branch().is_none());
     }
 }
