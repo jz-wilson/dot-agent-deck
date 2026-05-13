@@ -29,7 +29,7 @@ fn git_version() -> Option<String> {
     // Basic semver check: digits.digits.digits
     let parts: Vec<&str> = stripped.split('.').collect();
     if parts.len() == 3 && parts.iter().all(|p| p.parse::<u64>().is_ok()) {
-        Some(stripped.to_string())
+        Some(format!("{stripped}-jz"))
     } else {
         None
     }
