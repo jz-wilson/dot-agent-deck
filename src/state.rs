@@ -86,6 +86,10 @@ pub struct AppState {
 pub type SharedState = Arc<RwLock<AppState>>;
 
 impl AppState {
+    fn is_interactive_tool(name: &str) -> bool {
+        matches!(name, "AskUserQuestion" | "ExitPlanMode")
+    }
+
     pub fn aggregate_stats(&self) -> DashboardStats {
         let mut stats = DashboardStats::default();
         for session in self.sessions.values() {
@@ -317,11 +321,16 @@ impl AppState {
                 session.active_tool = None;
             }
             EventType::ToolStart => {
+                let tool_name = event.tool_name.clone().unwrap_or_default();
                 if session.status != SessionStatus::WaitingForInput {
-                    session.status = SessionStatus::Working;
+                    session.status = if Self::is_interactive_tool(&tool_name) {
+                        SessionStatus::WaitingForInput
+                    } else {
+                        SessionStatus::Working
+                    };
                 }
                 session.active_tool = Some(ActiveTool {
-                    name: event.tool_name.clone().unwrap_or_default(),
+                    name: tool_name,
                     detail: event.tool_detail.clone(),
                 });
             }
@@ -589,11 +598,38 @@ mod tests {
         let mut tool_start = make_event("s1", EventType::ToolStart);
         tool_start.tool_name = Some("AskUserQuestion".to_string());
         state.apply_event(tool_start);
-        assert_eq!(state.sessions["s1"].status, SessionStatus::Working);
+        assert_eq!(state.sessions["s1"].status, SessionStatus::WaitingForInput);
 
-        // AskUserQuestion is interactive — Notification transitions to WaitingForInput.
+        // Notification follow-up is idempotent — status stays WaitingForInput.
         state.apply_event(make_event("s1", EventType::WaitingForInput));
         assert_eq!(state.sessions["s1"].status, SessionStatus::WaitingForInput);
+    }
+
+    #[test]
+    fn exit_plan_mode_shows_waiting_for_input() {
+        let mut state = AppState::default();
+        state.apply_event(make_event("s1", EventType::SessionStart));
+
+        let mut tool_start = make_event("s1", EventType::ToolStart);
+        tool_start.tool_name = Some("ExitPlanMode".to_string());
+        state.apply_event(tool_start);
+        assert_eq!(state.sessions["s1"].status, SessionStatus::WaitingForInput);
+    }
+
+    #[test]
+    fn regular_tool_still_shows_working() {
+        let mut state = AppState::default();
+        state.apply_event(make_event("s1", EventType::SessionStart));
+
+        let mut tool_start = make_event("s1", EventType::ToolStart);
+        tool_start.tool_name = Some("Read".to_string());
+        state.apply_event(tool_start);
+        assert_eq!(state.sessions["s1"].status, SessionStatus::Working);
+
+        let mut tool_start_bash = make_event("s1", EventType::ToolStart);
+        tool_start_bash.tool_name = Some("Bash".to_string());
+        state.apply_event(tool_start_bash);
+        assert_eq!(state.sessions["s1"].status, SessionStatus::Working);
     }
 
     #[test]
